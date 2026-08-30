@@ -31,13 +31,23 @@ NEO4J_USER = os.environ.get("NEO4J_USER", "neo4j")
 NEO4J_PASSWORD = os.environ.get("NEO4J_PASSWORD")
 LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "rule_based")
 
+# Symptomノードの名寄せ用カテゴリ辞書。自由記述のsymptomだと表記ゆれで
+# 別ノードに分裂する(例:「吐出圧力低下」と「吐出圧力の低下」)ため、
+# ここから選ばせたカテゴリをSymptomノードのMERGEキーにする(詳細はdocs/schema.md)
+SYMPTOM_CATEGORIES = [
+    "異音", "振動", "圧力低下", "発熱", "温度上昇", "停止", "起動不良",
+    "動作異常", "位置精度低下", "冷却能力低下", "バッテリー低下",
+    "部品損傷", "汚損・劣化", "その他",
+]
+
 EXTRACTION_PROMPT = """以下は設備保全のトラブル報告書です。
 このテキストから、以下のJSON形式で情報を抽出してください。
 出力はJSONのみとし、説明文は含めないでください。
 
 {{
   "equipment": "設備名",
-  "symptom": "発生した症状(短い名詞句)",
+  "symptom": "発生した症状(短い名詞句、報告書の記述に近い自由記述)",
+  "symptom_category": "以下のカテゴリ一覧から最も近いものを1つだけ選ぶ: {categories}",
   "cause": "原因(短い名詞句)",
   "action": "対処内容(短い名詞句)",
   "part": "使用部品名(なければnull)"
@@ -66,7 +76,7 @@ def extract_entities_claude_code(text: str) -> dict:
     # claude.aiログイン(Pro/Max定額)より優先してそれを使おうとし失敗するため除外する
     env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
 
-    prompt = EXTRACTION_PROMPT.format(text=text)
+    prompt = EXTRACTION_PROMPT.format(text=text, categories=", ".join(SYMPTOM_CATEGORIES))
     result = subprocess.run(
         ["claude", "-p", prompt],
         capture_output=True,
@@ -99,7 +109,7 @@ def extract_entities_llm(text: str) -> dict:
     else:
         raise ValueError(f"Unknown LLM_PROVIDER: {LLM_PROVIDER}")
 
-    resp = llm.invoke(EXTRACTION_PROMPT.format(text=text))
+    resp = llm.invoke(EXTRACTION_PROMPT.format(text=text, categories=", ".join(SYMPTOM_CATEGORIES)))
     content = resp.content if hasattr(resp, "content") else str(resp)
     content = re.sub(r"```(json)?", "", content).strip()
     return json.loads(content)
@@ -121,9 +131,11 @@ def extract_entities_rule_based(text: str) -> dict:
                 return v
         return None
 
+    symptom = find_first(symptom_kw) or "不明"
     return {
         "equipment": None,  # 呼び出し側で record["equipment"] を使う
-        "symptom": find_first(symptom_kw) or "不明",
+        "symptom": symptom,
+        "symptom_category": symptom if symptom in SYMPTOM_CATEGORIES else "その他",
         "cause": find_first(cause_kw) or "不明",
         "action": find_first(action_kw) or "不明",
         "part": find_first(part_kw),
@@ -140,10 +152,14 @@ MERGE (eq:Equipment {name: $equipment})
 MERGE (r:ReportEvent {report_id: $report_id})
   SET r.date = $date, r.reporter = $reporter
 MERGE (r)-[:OCCURRED_ON]->(eq)
-MERGE (s:Symptom {name: $symptom})
-MERGE (r)-[:HAS_SYMPTOM]->(s)
+MERGE (s:Symptom {name: $symptom_category})
+MERGE (r)-[h:HAS_SYMPTOM]->(s)
+  SET h.detail = $symptom
 MERGE (c:Cause {name: $cause})
-MERGE (s)-[:CAUSED_BY]->(c)
+// CAUSED_BYはSymptomではなくReportEventから直接張る。Symptomはカテゴリ共有
+// ノードのため、Symptom起点にすると「同じカテゴリを持つ別設備・別報告書の
+// 原因」まで拾ってしまうクロス混入が起きる(Equipment条件で絞ってもすり抜ける)
+MERGE (r)-[:CAUSED_BY]->(c)
 MERGE (a:Action {name: $action})
 MERGE (c)-[:RESOLVED_BY]->(a)
 FOREACH (_ IN CASE WHEN $part IS NOT NULL THEN [1] ELSE [] END |
@@ -182,6 +198,12 @@ def main():
                 # 常に元データの正規化済み値を使う(グラフのEquipmentノード分裂を防ぐ)
                 equipment=record["equipment"],
                 symptom=entities.get("symptom") or "不明",
+                # Symptomノードは自由記述だと表記ゆれで分裂する(例:「吐出圧力低下」と
+                # 「吐出圧力の低下」)ため、統制されたカテゴリでMERGEする。元の自由記述は
+                # HAS_SYMPTOM関係のdetailプロパティとして保持する
+                symptom_category=entities.get("symptom_category")
+                if entities.get("symptom_category") in SYMPTOM_CATEGORIES
+                else "その他",
                 cause=entities.get("cause") or "不明",
                 action=entities.get("action") or "不明",
                 part=entities.get("part"),

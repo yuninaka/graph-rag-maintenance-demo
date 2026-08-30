@@ -22,7 +22,10 @@ from langchain_community.vectorstores import Chroma
 from langchain_community.graphs import Neo4jGraph
 from langchain_community.chains.graph_qa.cypher import GraphCypherQAChain
 from langchain.agents import create_agent
+from langchain_core.prompts import PromptTemplate
 from langchain_core.tools import Tool
+
+from src.build_knowledge_graph import SYMPTOM_CATEGORIES
 
 load_dotenv()
 
@@ -65,6 +68,33 @@ def build_vector_tool(llm):
     )
 
 
+# Symptom.nameは自由記述ではなくSYMPTOM_CATEGORIESからの統制語彙(build_knowledge_graph.py参照)。
+# デフォルトのCypher生成プロンプトはこれを知らず、質問文の言葉をそのままname一致に
+# 使おうとして表記ゆれ以前に0件になる(例:「ベアリングの異音」)ため、
+# カテゴリへのマッピングを明示的に指示するプロンプトに差し替える
+CYPHER_GENERATION_TEMPLATE = """Task: Cypher文を生成してNeo4jグラフデータベースに問い合わせてください。
+スキーマで示された関係・プロパティのみを使用してください。
+
+重要: Symptom.name は自由記述ではなく、以下のカテゴリ一覧からのみ選ばれた統制語彙です。
+質問文にどんな症状の言葉が出てきても、必ずこのカテゴリ一覧の中から意味的に最も近いものを
+1つ選び、name プロパティの完全一致で問い合わせてください(部分一致・CONTAINSは使わない)。
+
+カテゴリ一覧: {categories}
+
+スキーマ:
+{{schema}}
+
+質問:
+{{question}}
+
+Cypher文のみを出力し、説明文やコードブロックの記号は含めないでください。
+""".format(categories=", ".join(SYMPTOM_CATEGORIES))
+
+CYPHER_GENERATION_PROMPT = PromptTemplate(
+    input_variables=["schema", "question"], template=CYPHER_GENERATION_TEMPLATE
+)
+
+
 def build_graph_tool(llm):
     graph = Neo4jGraph(
         url=os.environ["NEO4J_URI"],
@@ -77,6 +107,7 @@ def build_graph_tool(llm):
     chain = GraphCypherQAChain.from_llm(
         llm=llm,
         graph=graph,
+        cypher_prompt=CYPHER_GENERATION_PROMPT,
         verbose=True,
         allow_dangerous_requests=True,  # ローカル検証用途のため許可。本番投入時は権限設計を別途行う
     )
