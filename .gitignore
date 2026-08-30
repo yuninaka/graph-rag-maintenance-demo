@@ -1,0 +1,20 @@
+# 秘匿情報(絶対にコミットしない)
+.env
+
+# 生成物・ローカルインデックス
+chroma_db/
+eval/eval_results.json
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code local settings (personal overrides, not shared with team)
+.claude/settings.local.json
