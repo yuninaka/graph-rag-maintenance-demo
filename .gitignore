@@ -3,7 +3,6 @@
 
 # 生成物・ローカルインデックス
 chroma_db/
-eval/eval_results.json
 
 # Python
 venv/

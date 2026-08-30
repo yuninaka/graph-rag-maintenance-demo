@@ -89,8 +89,25 @@ python src/build_knowledge_graph.py
 python src/hybrid_agent.py
 
 # 4. 精度評価(golden_qa.jsonlに対する自動採点)
-python src/evaluate.py
+# evaluate.py は `from src.hybrid_agent import ...` と絶対importのため、
+# モジュールとして実行する(python src/evaluate.py 直接実行だと失敗する)
+python -m src.evaluate
 ```
+
+## 評価結果(直近の実行)
+
+`eval/golden_qa.jsonl`(9問)に対する `evaluate.py` の実行結果。詳細は `eval/eval_results.json`、
+低スコア質問の原因分析は `docs/troubleshooting_log.md` を参照。
+
+| type別 | 平均スコア | 件数 |
+|---|---|---|
+| graph | 0.80 | 5件 |
+| vector | 1.00 | 4件 |
+| **全体** | **0.89** | 9件 |
+
+graph検索タイプのQ1のみ0.00(Symptomノードが自由記述テキストのままで正規化されておらず、
+同じ症状でも表記が違うと別ノード扱いになる設計上の課題。カテゴリ/タグ付けの仕組み追加が
+根本対応として必要、未着手)。
 
 ## この後のロードマップ(目安)
 
