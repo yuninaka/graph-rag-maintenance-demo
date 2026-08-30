@@ -1,0 +1,9 @@
+{"id": "Q1", "question": "コンベアAでベアリングの異音は過去に何回報告されていますか？", "expected_keywords": ["3", "R001", "R006", "R010"], "type": "graph"}
+{"id": "Q2", "question": "ポンプ3号機の吐出圧力低下の原因として過去にあったものを教えてください", "expected_keywords": ["羽根車", "異物", "フィルター", "目詰まり"], "type": "graph"}
+{"id": "Q3", "question": "コンベアAのベルトから異音がする場合、考えられる原因は何ですか？", "expected_keywords": ["ベアリング", "摩耗", "テンション"], "type": "vector"}
+{"id": "Q4", "question": "ポンプ3号機の軸受け発熱の対処法として何が行われましたか？", "expected_keywords": ["注油", "グリース", "耐熱"], "type": "vector"}
+{"id": "Q5", "question": "コンベアBが停止した原因を全て教えてください", "expected_keywords": ["モーター", "取り付けボルト", "絶縁不良", "近接センサー"], "type": "graph"}
+{"id": "Q6", "question": "空調ユニット1号機で過去に発生したトラブルを全て教えてください", "expected_keywords": ["フィルター", "冷媒漏れ", "ファンモーター"], "type": "graph"}
+{"id": "Q7", "question": "搬送ロボット1号機のアーム異常の原因として考えられるものは何ですか？", "expected_keywords": ["グリース", "ギア", "エンコーダー"], "type": "vector"}
+{"id": "Q8", "question": "圧縮機Aの吐出温度上昇の原因は何でしたか？", "expected_keywords": ["ベルト", "スケール"], "type": "vector"}
+{"id": "Q9", "question": "ポンプ3号機で吐出圧力低下が発生した原因は何回、それぞれ何が原因でしたか？", "expected_keywords": ["異物", "フィルター", "メカニカルシール", "R002", "R007", "R015"], "type": "graph"}

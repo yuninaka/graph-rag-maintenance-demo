@@ -1,0 +1,108 @@
+# グラフRAG 設備保全ナレッジベース 最小実証プロジェクト
+
+生成AI×ナレッジグラフ(グラフRAG)案件で求められる技術要素を、
+最小構成で「実装経験」として積み上げるための個人検証プロジェクトです。
+設備保全ドメイン(操業日誌・トラブル報告書)を模した合成データを使い、
+非構造化ログ → ナレッジグラフ化 → ハイブリッド検索(ベクトル+グラフ) →
+AIエージェント応答 → 精度評価、までの一気通貫パイプラインを構築します。
+
+## なぜこの構成か(求人要件とのマッピング)
+
+| 求人の必須/歓迎スキル | 本プロジェクトでの対応箇所 |
+|---|---|
+| ナレッジグラフのデータ構造(ノード・エッジ)設計 | `docs/schema.md`、`src/build_knowledge_graph.py` |
+| AI-OCRで構造化したデータのグラフ化(Python) | `data/maintenance_logs.jsonl`(構造化済み想定データ) + `src/build_knowledge_graph.py`。実案件ではAzure Document Intelligenceの出力をここに差し替える想定で拡張ポイントをコメントで明示 |
+| グラフDB(Neo4j等OSS)へのデータ投入・運用 | `src/build_knowledge_graph.py`(Neo4j AuraDB Free) |
+| LangChain/LangGraphでのAIエージェント(チャットボット) | `src/hybrid_agent.py` |
+| 想定通りの回答が得られない場合の原因分析 | `docs/troubleshooting_log.md`(検証時に実際に記録する運用) |
+| 回答精度の測定方法の設計・評価 | `eval/golden_qa.jsonl` + `src/evaluate.py` |
+| ベクトルRAG(チャンク設計・インデックス設計) | `src/build_vector_index.py` |
+
+## アーキテクチャ
+
+```
+[非構造化ログ(合成データ)]
+        │
+        ├─→ [チャンク分割 + 埋め込み] → [Chroma(ベクトルDB)] ──┐
+        │                                                      │
+        └─→ [LLMによるエンティティ/関係抽出] → [Neo4j(グラフDB)]─┤
+                                                                 ▼
+                                                    [LangChain ハイブリッド検索]
+                                                    ・ベクトル類似検索 Retriever
+                                                    ・GraphCypherQAChain
+                                                                 │
+                                                                 ▼
+                                                   [Agent: 質問に応じてツール選択]
+                                                                 │
+                                                                 ▼
+                                                        [回答 + 精度評価]
+```
+
+## セットアップ
+
+```bash
+python -m venv venv
+source venv/bin/activate  # Windowsは venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+### Neo4j AuraDB Free の準備
+1. https://neo4j.com/product/auradb/ からFree tierでインスタンス作成(クレジットカード不要)
+2. 発行される接続情報を `.env` に設定
+
+```
+NEO4J_URI=neo4j+s://xxxxx.databases.neo4j.io
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=xxxxx
+LLM_PROVIDER=claude_code   # rule_based / claude_code / anthropic / openai から選択
+ANTHROPIC_API_KEY=xxxxx    # LLM_PROVIDER=anthropic の場合のみ必要
+OPENAI_API_KEY=xxxxx       # LLM_PROVIDER=openai の場合のみ必要
+```
+
+### LLM_PROVIDERの選択肢とコスト方針
+
+| 値 | コスト | 用途 |
+|---|---|---|
+| `rule_based` | 無料 | パイプラインの疎通確認。精度は粗い |
+| `claude_code` | **Pro/Maxプラン定額内**(要`claude` CLIインストール・ログイン) | `build_knowledge_graph.py`のエンティティ抽出(バッチ処理)。推奨 |
+| `anthropic` / `openai` | **API従量課金** | `hybrid_agent.py`のLangChain Agent実行時のみ。Tool-calling(Function calling)プロトコルに依存するため、Claude Codeでの定額代替が構造上できない |
+
+**方針の理由**: エンティティ抽出は1件ずつの単発呼び出しで完結するバッチ処理のため、
+Claude Code CLI(`claude -p "..."`)への置き換えでProプラン定額に収められる。
+一方、ハイブリッドエージェント(`hybrid_agent.py`)はLangChainのTool-calling機構
+そのものを検証する部分であり、ここをClaude Codeに置き換えると
+LangChain Agent実装の検証という本来の目的から外れてしまうため、
+少額のAPI課金を許容してAPI経由のまま実装している。
+「どこはコスト最適化してよく、どこは目的に直結するので手を抜かないか」
+という判断の一例として、Zenn記事にもそのまま書ける。
+
+## 実行順序
+
+```bash
+# 1. ベクトルインデックス構築
+python src/build_vector_index.py
+
+# 2. ナレッジグラフ構築(Neo4jへ投入)
+python src/build_knowledge_graph.py
+
+# 3. ハイブリッドエージェントで質問応答(対話形式)
+python src/hybrid_agent.py
+
+# 4. 精度評価(golden_qa.jsonlに対する自動採点)
+python src/evaluate.py
+```
+
+## この後のロードマップ(目安)
+
+| フェーズ | 内容 | 目安期間 |
+|---|---|---|
+| 1 | 本スキャフォールドを動かし、Neo4j Aura Free接続・LangChain疎通を確認 | 1〜2日 |
+| 2 | 合成データを自分でもう少し拡張(30〜50件)し、ノード種別を増やす(例: 部品の型番、メーカー等) | 2〜3日 |
+| 3 | `evaluate.py` で精度測定の方法論を自分の言葉で整理し、ベクトル単体/グラフ単体/ハイブリッドの精度比較を行う | 2〜3日 |
+| 4 | 検証結果をZenn記事化。過去記事と同様に「うまくいかなかった点・原因分析」を含めると説得力が増す | 2〜3日 |
+| 5(任意) | Azure Document Intelligenceの無料枠でOCR部分も実装し、パイプラインを完全に求人要件と一致させる | 追加2〜3日 |
+
+合計で正味1〜2週間程度(実務と並行)を想定した設計です。
+フェーズ3までで「ベクトルRAGの取り扱い経験」「グラフDB実務経験」
+「LangChainでのRetrieval/Agent機能の実装経験」を職務経歴書に
+具体的な数字(精度○%、評価件数○件等)とともに書ける状態になります。
