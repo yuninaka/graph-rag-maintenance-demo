@@ -50,8 +50,15 @@ EXTRACTION_PROMPT = """以下は設備保全のトラブル報告書です。
   "symptom_category": "以下のカテゴリ一覧から最も近いものを1つだけ選ぶ: {categories}",
   "cause": "原因(短い名詞句)",
   "action": "対処内容(短い名詞句)",
-  "part": "使用部品名(なければnull)"
+  "part": "使用部品名(なければnull)",
+  "backreferences": [
+    {{"report_id": "本文中に明示的に登場する過去の報告書ID(例: R005)", "implied_category": "その過去の報告書について、本文の記述から今回追加で分かった症状カテゴリ(上記カテゴリ一覧から1つ)"}}
+  ]
 }}
+
+backreferencesは、本文が「前回(R005)は...」のように過去の報告書IDを明示的に挙げて、
+その報告書の症状を今回の文脈で再解釈・補足している場合のみ含めてください。
+そうした言及がなければ空配列 [] にしてください。
 
 報告書:
 {text}
@@ -139,6 +146,7 @@ def extract_entities_rule_based(text: str) -> dict:
         "cause": find_first(cause_kw) or "不明",
         "action": find_first(action_kw) or "不明",
         "part": find_first(part_kw),
+        "backreferences": [],  # 簡易版では後方参照検出は行わない
     }
 
 
@@ -166,6 +174,17 @@ FOREACH (_ IN CASE WHEN $part IS NOT NULL THEN [1] ELSE [] END |
   MERGE (p:Part {name: $part})
   MERGE (a)-[:USES_PART]->(p)
 )
+"""
+
+# 後方参照(「前回(R005)は...」等)による差分更新。参照先レポートの全履歴を
+# 読み直すのではなく、今回のレポート本文だけから分かった追加カテゴリを
+# 参照先ReportEventに軽量に追記する(件数が増えてもコストが増えないスケールする設計)
+CYPHER_BACKREFERENCE_UPDATE = """
+MATCH (r:ReportEvent {report_id: $ref_report_id})
+MERGE (s:Symptom {name: $implied_category})
+MERGE (r)-[h:HAS_SYMPTOM]->(s)
+  SET h.detail = coalesce(h.detail, $implied_category),
+      h.inferred_from = $source_report_id
 """
 
 
@@ -208,6 +227,21 @@ def main():
                 action=entities.get("action") or "不明",
                 part=entities.get("part"),
             )
+
+            # 後方参照(過去レポートIDへの言及)があれば、参照先レポートへ軽量な
+            # 追加カテゴリを反映する。参照先が未処理(レポート順序の想定外)の
+            # 場合はCypher側でMATCHが0件になり何も起きない
+            for ref in entities.get("backreferences") or []:
+                ref_id = ref.get("report_id")
+                implied = ref.get("implied_category")
+                if ref_id and implied in SYMPTOM_CATEGORIES:
+                    session.run(
+                        CYPHER_BACKREFERENCE_UPDATE,
+                        ref_report_id=ref_id,
+                        implied_category=implied,
+                        source_report_id=record["report_id"],
+                    )
+
             print(f"  {record['report_id']}: {entities}")
 
     driver.close()
