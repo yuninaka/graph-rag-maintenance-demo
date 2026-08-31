@@ -3,6 +3,7 @@
 
 # 生成物・ローカルインデックス
 chroma_db/
+data/inspection_forms/
 
 # Python
 venv/
