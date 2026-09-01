@@ -7,12 +7,15 @@ AI画像生成(DALL-E等)は密度の高い日本語テキストの描画が不�
 実データをそのままテキストとしてHTML帳票に流し込み、正解が確実な
 サンプル書類を作る用途のスクリプト。
 
-生成したHTMLはブラウザで開き、印刷機能で「PDFに保存」すれば
-そのままDocument Intelligenceへの入力サンプルとして使える。
+HTMLに加えてPDFも自動生成する(weasyprintでHTML/CSSを直接PDF化。
+ヘッドレスブラウザのダウンロードが不要な軽量な実装のため採用)。
+生成したPDFはそのままDocument Intelligenceへの入力サンプルとして使える。
 """
 import json
 import sys
 from pathlib import Path
+
+from weasyprint import HTML
 
 DATA_PATH = Path(__file__).parent.parent / "data" / "maintenance_logs.jsonl"
 OUTPUT_DIR = Path(__file__).parent.parent / "data" / "inspection_forms"
@@ -118,7 +121,7 @@ def load_record(report_id: str) -> dict:
     raise ValueError(f"report_id {report_id} が見つかりません")
 
 
-def render_record(record: dict) -> Path:
+def render_record(record: dict) -> tuple[Path, Path]:
     html = HTML_TEMPLATE.format(
         report_id=record["report_id"],
         date=record["date"],
@@ -127,23 +130,27 @@ def render_record(record: dict) -> Path:
         text=record["text"],
     )
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    out_path = OUTPUT_DIR / f"{record['report_id']}.html"
-    out_path.write_text(html, encoding="utf-8")
-    return out_path
+    html_path = OUTPUT_DIR / f"{record['report_id']}.html"
+    html_path.write_text(html, encoding="utf-8")
+
+    pdf_path = OUTPUT_DIR / f"{record['report_id']}.pdf"
+    HTML(string=html, base_url=str(OUTPUT_DIR)).write_pdf(pdf_path)
+
+    return html_path, pdf_path
 
 
-def render(report_id: str) -> Path:
+def render(report_id: str) -> tuple[Path, Path]:
     return render_record(load_record(report_id))
 
 
-def render_all() -> list[Path]:
+def render_all() -> list[tuple[Path, Path]]:
     return [render_record(record) for record in load_all_records()]
 
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
-        path = render(sys.argv[1])
-        print(f"生成しました: {path}")
+        html_path, pdf_path = render(sys.argv[1])
+        print(f"生成しました: {html_path}, {pdf_path}")
     else:
-        paths = render_all()
-        print(f"{len(paths)}件生成しました: {OUTPUT_DIR}")
+        results = render_all()
+        print(f"{len(results)}件(HTML+PDF)生成しました: {OUTPUT_DIR}")
