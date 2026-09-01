@@ -24,7 +24,13 @@ from neo4j import GraphDatabase
 
 load_dotenv()
 
-DATA_PATH = Path(__file__).parent.parent / "data" / "maintenance_logs.jsonl"
+# 環境変数MAINTENANCE_LOGS_PATHで差し替え可能(例: OCR由来のdata/maintenance_logs_ocr.jsonl)。
+# パイプラインの入力を「合成データ」から「Document Intelligenceの抽出結果」に
+# 切り替えて、同じ抽出・投入コードをそのまま使えることを検証するための拡張ポイント
+DATA_PATH = Path(
+    os.environ.get("MAINTENANCE_LOGS_PATH")
+    or (Path(__file__).parent.parent / "data" / "maintenance_logs.jsonl")
+)
 
 NEO4J_URI = os.environ.get("NEO4J_URI")
 NEO4J_USER = os.environ.get("NEO4J_USER", "neo4j")

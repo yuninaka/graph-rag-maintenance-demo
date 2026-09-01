@@ -139,6 +139,28 @@ python scripts/render_inspection_form.py
 python scripts/ocr_document_intelligence.py
 ```
 
+### パイプライン完成: OCR結果をナレッジグラフ構築に接続
+
+`scripts/ocr_to_records.py` で、Document Intelligenceの構造化レスポンス
+(`result.tables` / `result.paragraphs`)から `maintenance_logs.jsonl` 互換の
+レコードを組み立て、`build_knowledge_graph.py` の `MAINTENANCE_LOGS_PATH`
+環境変数でデータソースを差し替えられるようにした。これで
+「紙の書類(PDF)→OCR→ナレッジグラフ→ハイブリッド検索→回答」という
+一気通貫パイプラインが完成した。
+
+```bash
+# PDF35件をOCRし、maintenance_logs.jsonl互換のJSONLを生成
+python scripts/ocr_to_records.py
+
+# OCR由来データでナレッジグラフを構築(通常はdata/maintenance_logs.jsonlを使用)
+MAINTENANCE_LOGS_PATH=data/maintenance_logs_ocr.jsonl python src/build_knowledge_graph.py
+```
+
+OCR由来データで`evaluate.py`を実行したところ、合成データを直接使った場合と同じ
+**9問全問score=1.00**を達成した。R012のOCR誤読(「O」→「〇」)はLLMによる
+エンティティ抽出段階で「Oリング」という一般的な部品名として自動的に補正され、
+最終的な回答精度には影響しなかった。詳細は `docs/troubleshooting_log.md` を参照。
+
 ## この後のロードマップ(目安)
 
 | フェーズ | 内容 | 目安期間 |

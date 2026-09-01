@@ -4,6 +4,7 @@
 # 生成物・ローカルインデックス
 chroma_db/
 data/inspection_forms/
+data/maintenance_logs_ocr.jsonl
 
 # Python
 venv/
