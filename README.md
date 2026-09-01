@@ -113,6 +113,32 @@ Symptomノードの名寄せ(カテゴリ辞書によるMERGE)、後方参照検
 後方参照の誤検出(false positive)など複数の実装バグを発見・修正している。
 経緯の全体は `docs/troubleshooting_log.md` を参照。
 
+## AI-OCR連携検証(Azure Document Intelligence)
+
+合成データ35件を `scripts/render_inspection_form.py` で点検記録表PDFにレンダリングし
+(正解データが既知)、`scripts/ocr_document_intelligence.py` でAzure Document
+Intelligence(`prebuilt-layout`モデル)に投げて抽出結果を正解と比較した。
+
+| 指標 | 結果 |
+|---|---|
+| 平均類似度(35件) | **0.9990** |
+| 完全一致 | 33/35件 |
+
+2件で興味深い誤りが見つかった: アルファベット「O」を丸記号「〇」と混同する視覚的な
+誤認識(R012)、帳票の印影をチェックボックスと誤検出(R013)。今回のPDFはテキストが
+埋め込まれた「デジタルネイティブPDF」であり、テキストレイヤーがそのまま使われる
+なら起きないはずの誤りが実際に発生したことから、**Document Intelligenceは単純に
+テキストレイヤーを再利用せず、実際に画像として視覚的な認識処理を行っている**
+可能性が示唆される。詳細は `docs/troubleshooting_log.md` を参照。
+
+```bash
+# 点検記録表PDFを生成(全35件、または引数でreport_idを1件指定)
+python scripts/render_inspection_form.py
+
+# Document Intelligenceで精度検証(.envにAZURE_DOCUMENT_INTELLIGENCE_*が必要)
+python scripts/ocr_document_intelligence.py
+```
+
 ## この後のロードマップ(目安)
 
 | フェーズ | 内容 | 目安期間 |
@@ -121,7 +147,7 @@ Symptomノードの名寄せ(カテゴリ辞書によるMERGE)、後方参照検
 | 2 | 合成データを自分でもう少し拡張(30〜50件)し、ノード種別を増やす(例: 部品の型番、メーカー等) | 2〜3日 |
 | 3 | `evaluate.py` で精度測定の方法論を自分の言葉で整理し、ベクトル単体/グラフ単体/ハイブリッドの精度比較を行う | 2〜3日 |
 | 4 | 検証結果をZenn記事化。過去記事と同様に「うまくいかなかった点・原因分析」を含めると説得力が増す | 2〜3日 |
-| 5(任意) | Azure Document Intelligenceの無料枠でOCR部分も実装し、パイプラインを完全に求人要件と一致させる | 追加2〜3日 |
+| 5(任意) | ~~Azure Document Intelligenceの無料枠でOCR部分も実装し、パイプラインを完全に求人要件と一致させる~~ → 完了(上記「AI-OCR連携検証」参照) | 追加2〜3日 |
 
 合計で正味1〜2週間程度(実務と並行)を想定した設計です。
 フェーズ3までで「ベクトルRAGの取り扱い経験」「グラフDB実務経験」
