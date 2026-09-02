@@ -31,7 +31,12 @@ from src.build_knowledge_graph import SYMPTOM_CATEGORIES
 
 load_dotenv()
 
-PERSIST_DIR = Path(__file__).parent.parent / "chroma_db"
+# build_vector_index.pyと同じCHROMA_PERSIST_DIRで、参照するインデックスを
+# データソース(合成データ/OCR由来データ)に合わせて切り替えられるようにする。
+PERSIST_DIR = Path(
+    os.environ.get("CHROMA_PERSIST_DIR")
+    or (Path(__file__).parent.parent / "chroma_db")
+)
 # 各ツール呼び出し・Agent全体の実行トレースを永続化するログ。標準出力(verbose=True等)
 # にしか残らない情報を「後から見返せる生ログ」として残すための一連の仕組み
 LOG_DIR = Path(__file__).parent.parent / "logs"
