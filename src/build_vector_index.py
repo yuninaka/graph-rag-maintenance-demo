@@ -16,6 +16,7 @@ API課金を避けるため、ローカルで動く多言語埋め込みモデ�
 HuggingFaceEmbeddings を AzureOpenAIEmbeddings に差し替えるだけでよい設計。
 """
 import json
+import os
 from pathlib import Path
 
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -23,8 +24,18 @@ from langchain_community.vectorstores import Chroma
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 
-DATA_PATH = Path(__file__).parent.parent / "data" / "maintenance_logs.jsonl"
-PERSIST_DIR = Path(__file__).parent.parent / "chroma_db"
+# 環境変数MAINTENANCE_LOGS_PATHで差し替え可能(例: OCR由来のdata/maintenance_logs_ocr.jsonl)。
+# build_knowledge_graph.pyと同じ差し替えパターン。
+DATA_PATH = Path(
+    os.environ.get("MAINTENANCE_LOGS_PATH")
+    or (Path(__file__).parent.parent / "data" / "maintenance_logs.jsonl")
+)
+# データソースを変えて検証し直す際に既存インデックスを混在させないよう、
+# 永続化先も環境変数CHROMA_PERSIST_DIRで分けられるようにする。
+PERSIST_DIR = Path(
+    os.environ.get("CHROMA_PERSIST_DIR")
+    or (Path(__file__).parent.parent / "chroma_db")
+)
 
 # 拡張ポイント: 長文書を扱う場合はここでチャンクサイズ/オーバーラップを調整
 SPLITTER = RecursiveCharacterTextSplitter(
