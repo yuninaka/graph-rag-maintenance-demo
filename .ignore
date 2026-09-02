@@ -1,0 +1,4 @@
+# Claude Codeの検索・自動読み込み(Grep/Glob等)から除外する。
+# .gitignoreとは別に、ripgrep形式の.ignoreファイルは常に尊重されるため、
+# 実行のたびに増えるログをAIが誤って読み込んでトークンを浪費しないようにする
+logs/
