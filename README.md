@@ -113,6 +113,18 @@ Symptomノードの名寄せ(カテゴリ辞書によるMERGE)、後方参照検
 後方参照の誤検出(false positive)など複数の実装バグを発見・修正している。
 経緯の全体は `docs/troubleshooting_log.md` を参照。
 
+### graph_queryの生ログを見る
+
+`GraphCypherQAChain`の`verbose=True`出力は標準出力にしか残らないため、
+`hybrid_agent.py`/`evaluate.py`経由で`graph_query`ツールが呼ばれるたびに、
+生成Cypher・Neo4jの実行結果(Full Context)・最終回答を`logs/graph_query.jsonl`
+に追記するようにしている(1呼び出し1行のJSONL、`logs/`は`.gitignore`対象)。
+
+```bash
+python -m src.evaluate   # 実行後、logs/graph_query.jsonl に9問分(graph typeのみ)が追記される
+tail -f logs/graph_query.jsonl | jq .   # 1件ずつ整形して確認する場合
+```
+
 ## AI-OCR連携検証(Azure Document Intelligence)
 
 合成データ35件を `scripts/render_inspection_form.py` で点検記録表PDFにレンダリングし

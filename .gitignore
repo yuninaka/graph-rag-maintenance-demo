@@ -5,6 +5,7 @@
 chroma_db/
 data/inspection_forms/
 data/maintenance_logs_ocr.jsonl
+logs/
 
 # Python
 venv/

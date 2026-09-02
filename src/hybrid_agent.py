@@ -13,7 +13,9 @@
 これは「Retrieval機能」(1)と「Agent機能」(ツール選択の自律判断、2)の
 両方を含む構成になっている。
 """
+import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -30,6 +32,10 @@ from src.build_knowledge_graph import SYMPTOM_CATEGORIES
 load_dotenv()
 
 PERSIST_DIR = Path(__file__).parent.parent / "chroma_db"
+# graph_queryツール呼び出しごとに、生成Cypher・Full Context・最終回答を追記する。
+# GraphCypherQAChainのverbose=True出力は標準出力にしか残らず再現できないため、
+# 「後から見返せる生ログ」として永続化する
+GRAPH_QUERY_LOG_PATH = Path(__file__).parent.parent / "logs" / "graph_query.jsonl"
 
 LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "anthropic")
 
@@ -95,6 +101,29 @@ CYPHER_GENERATION_PROMPT = PromptTemplate(
 )
 
 
+def _log_graph_query(query: str, result: dict) -> None:
+    """graph_query 1回分の生成Cypher・Full Context・最終回答をJSONLに追記する。
+
+    intermediate_steps は [{"query": <生成Cypher>}, {"context": <Neo4j実行結果>}]
+    という2要素のリストを想定しているが、チェーンがCypher生成前にエラーになった
+    場合等は要素数が変わりうるため、存在チェックしてから読む。
+    """
+    steps = result.get("intermediate_steps") or []
+    generated_cypher = steps[0].get("query") if len(steps) > 0 else None
+    context = steps[1].get("context") if len(steps) > 1 else None
+
+    GRAPH_QUERY_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    entry = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "question": query,
+        "generated_cypher": generated_cypher,
+        "context": context,
+        "answer": result.get("result"),
+    }
+    with open(GRAPH_QUERY_LOG_PATH, "a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
 def build_graph_tool(llm):
     graph = Neo4jGraph(
         url=os.environ["NEO4J_URI"],
@@ -109,11 +138,13 @@ def build_graph_tool(llm):
         graph=graph,
         cypher_prompt=CYPHER_GENERATION_PROMPT,
         verbose=True,
+        return_intermediate_steps=True,
         allow_dangerous_requests=True,  # ローカル検証用途のため許可。本番投入時は権限設計を別途行う
     )
 
     def run(query: str) -> str:
         result = chain.invoke({"query": query})
+        _log_graph_query(query, result)
         return result.get("result", str(result))
 
     return Tool(
