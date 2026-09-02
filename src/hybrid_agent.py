@@ -32,10 +32,18 @@ from src.build_knowledge_graph import SYMPTOM_CATEGORIES
 load_dotenv()
 
 PERSIST_DIR = Path(__file__).parent.parent / "chroma_db"
-# graph_queryツール呼び出しごとに、生成Cypher・Full Context・最終回答を追記する。
-# GraphCypherQAChainのverbose=True出力は標準出力にしか残らず再現できないため、
-# 「後から見返せる生ログ」として永続化する
-GRAPH_QUERY_LOG_PATH = Path(__file__).parent.parent / "logs" / "graph_query.jsonl"
+# 各ツール呼び出し・Agent全体の実行トレースを永続化するログ。標準出力(verbose=True等)
+# にしか残らない情報を「後から見返せる生ログ」として残すための一連の仕組み
+LOG_DIR = Path(__file__).parent.parent / "logs"
+GRAPH_QUERY_LOG_PATH = LOG_DIR / "graph_query.jsonl"
+VECTOR_SEARCH_LOG_PATH = LOG_DIR / "vector_search.jsonl"
+AGENT_TRACE_LOG_PATH = LOG_DIR / "agent_trace.jsonl"
+
+
+def _append_jsonl(path: Path, entry: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "anthropic")
 
@@ -52,6 +60,27 @@ def get_llm():
     raise ValueError("hybrid_agent.py の実行には LLM_PROVIDER=anthropic か openai が必要です")
 
 
+def _log_vector_search(query: str, docs: list) -> None:
+    """vector_search 1回分の検索結果(ヒットしたチャンクとそのメタデータ)をJSONLに追記する。
+
+    graph_queryのログと対称的に、「なぜその報告書が引っかかったか」を後から
+    確認できるようにする(埋め込みの類似度スコアはretrieverのデフォルトAPIでは
+    invoke()時に返らないため、report_id・チャンク本文のみを記録する)。
+    """
+    _append_jsonl(VECTOR_SEARCH_LOG_PATH, {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "question": query,
+        "hits": [
+            {
+                "report_id": d.metadata.get("report_id"),
+                "equipment": d.metadata.get("equipment"),
+                "content": d.page_content,
+            }
+            for d in docs
+        ],
+    })
+
+
 def build_vector_tool(llm):
     embeddings = HuggingFaceEmbeddings(model_name="intfloat/multilingual-e5-small")
     vectorstore = Chroma(persist_directory=str(PERSIST_DIR), embedding_function=embeddings)
@@ -59,6 +88,7 @@ def build_vector_tool(llm):
 
     def run(query: str) -> str:
         docs = retriever.invoke(query)
+        _log_vector_search(query, docs)
         return "\n---\n".join(
             f"[{d.metadata['report_id']} / {d.metadata['equipment']}] {d.page_content}"
             for d in docs
@@ -112,16 +142,13 @@ def _log_graph_query(query: str, result: dict) -> None:
     generated_cypher = steps[0].get("query") if len(steps) > 0 else None
     context = steps[1].get("context") if len(steps) > 1 else None
 
-    GRAPH_QUERY_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    entry = {
+    _append_jsonl(GRAPH_QUERY_LOG_PATH, {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "question": query,
         "generated_cypher": generated_cypher,
         "context": context,
         "answer": result.get("result"),
-    }
-    with open(GRAPH_QUERY_LOG_PATH, "a", encoding="utf-8") as f:
-        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    })
 
 
 def build_graph_tool(llm):
@@ -171,8 +198,34 @@ def build_agent():
     return create_agent(llm, tools, system_prompt=SYSTEM_PROMPT)
 
 
+def _log_agent_trace(query: str, messages: list) -> None:
+    """Agent全体の実行トレース(どのツールを、どの順で、どんな引数・結果で
+    呼んだか)をJSONLに追記する。
+
+    第2弾記事で「Agentがvector_searchも併用していたことに、回答文に
+    report_idがたまたま含まれていたことから間接的に気づいた」というケースが
+    あったため、以降はこの判断をログから直接確認できるようにする。
+    """
+    steps = []
+    for m in messages:
+        tool_calls = getattr(m, "tool_calls", None)
+        if tool_calls:
+            for tc in tool_calls:
+                steps.append({"type": "tool_call", "tool": tc["name"], "args": tc["args"]})
+        elif type(m).__name__ == "ToolMessage":
+            steps.append({"type": "tool_result", "tool": m.name, "content": m.content})
+
+    _append_jsonl(AGENT_TRACE_LOG_PATH, {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "question": query,
+        "steps": steps,
+        "final_answer": messages[-1].content,
+    })
+
+
 def run_agent(agent, query: str) -> str:
     result = agent.invoke({"messages": [{"role": "user", "content": query}]})
+    _log_agent_trace(query, result["messages"])
     return result["messages"][-1].content
 
 

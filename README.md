@@ -113,16 +113,21 @@ Symptomノードの名寄せ(カテゴリ辞書によるMERGE)、後方参照検
 後方参照の誤検出(false positive)など複数の実装バグを発見・修正している。
 経緯の全体は `docs/troubleshooting_log.md` を参照。
 
-### graph_queryの生ログを見る
+### 生ログを見る
 
-`GraphCypherQAChain`の`verbose=True`出力は標準出力にしか残らないため、
-`hybrid_agent.py`/`evaluate.py`経由で`graph_query`ツールが呼ばれるたびに、
-生成Cypher・Neo4jの実行結果(Full Context)・最終回答を`logs/graph_query.jsonl`
-に追記するようにしている(1呼び出し1行のJSONL、`logs/`は`.gitignore`対象)。
+`GraphCypherQAChain`の`verbose=True`出力やAgentのツール選択は標準出力にしか
+残らないため、`hybrid_agent.py`/`evaluate.py`経由で呼ばれるたびに`logs/`配下へ
+追記するようにしている(1呼び出し1行のJSONL、`logs/`は`.gitignore`対象)。
+
+| ログファイル | 内容 |
+|---|---|
+| `logs/graph_query.jsonl` | `graph_query`ツール1回ごとの、生成Cypher・Neo4jの実行結果(Full Context)・回答 |
+| `logs/vector_search.jsonl` | `vector_search`ツール1回ごとの、ヒットしたチャンク(report_id・設備名・本文) |
+| `logs/agent_trace.jsonl` | Agent1回の応答ごとの、呼び出したツールの順序・引数・結果・最終回答(`vector_search`と`graph_query`を両方使ったかどうかもここで確認できる) |
 
 ```bash
-python -m src.evaluate   # 実行後、logs/graph_query.jsonl に9問分(graph typeのみ)が追記される
-tail -f logs/graph_query.jsonl | jq .   # 1件ずつ整形して確認する場合
+python -m src.evaluate   # 実行後、logs/配下に9問分のログが追記される
+tail -f logs/agent_trace.jsonl | jq .   # 1件ずつ整形して確認する場合
 ```
 
 ## AI-OCR連携検証(Azure Document Intelligence)
