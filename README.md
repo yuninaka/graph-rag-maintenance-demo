@@ -178,6 +178,26 @@ OCR由来データで`evaluate.py`を実行したところ、合成データを�
 エンティティ抽出段階で「Oリング」という一般的な部品名として自動的に補正され、
 最終的な回答精度には影響しなかった。詳細は `docs/troubleshooting_log.md` を参照。
 
+### ベクトルインデックスもOCR由来データに接続
+
+`src/build_vector_index.py` も `MAINTENANCE_LOGS_PATH` / `CHROMA_PERSIST_DIR`
+環境変数でデータソースと永続化先を差し替えられるようにし、ベクトル側でも
+OCR由来データでの精度検証を行った。
+
+```bash
+# OCR由来データでベクトルインデックスを構築(通常はdata/maintenance_logs.jsonlを使用)
+MAINTENANCE_LOGS_PATH=data/maintenance_logs_ocr.jsonl \
+  CHROMA_PERSIST_DIR=chroma_db_ocr python -m src.build_vector_index
+```
+
+結果は graph 0.95 / vector 1.00 / 全体0.97(合成データ版はすべて1.00)。
+グラフ側はLLM抽出を経由するため、OCRのノイズ(語の途中への空白混入)が
+「意味は同じだが表記の異なる語」への書き換えとして伝播し、golden_qaの
+キーワード部分一致評価とかみ合わずスコアが下がった。一方ベクトル側は
+生テキストをそのまま埋め込むためノイズは補正されないが、埋め込みモデルの
+意味的類似度計算はこの程度のノイズには頑健だった。詳細は
+`docs/troubleshooting_log.md` を参照。
+
 ## この後のロードマップ(目安)
 
 | フェーズ | 内容 | 目安期間 |
