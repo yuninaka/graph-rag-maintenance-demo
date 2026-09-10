@@ -29,7 +29,7 @@ def keyword_coverage(answer: str, keywords: list[str]) -> float:
     return hit / len(keywords) if keywords else 0.0
 
 
-def main():
+def main() -> None:
     agent = build_agent()
 
     with open(EVAL_PATH, encoding="utf-8") as f:
@@ -45,7 +45,7 @@ def main():
         print(f"  A: {answer}\n")
 
     # type別集計
-    by_type = {}
+    by_type: dict[str, list[float]] = {}
     for r in results:
         by_type.setdefault(r["type"], []).append(r["score"])
 

@@ -38,7 +38,9 @@ def get_client() -> DocumentIntelligenceClient:
             "AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT / AZURE_DOCUMENT_INTELLIGENCE_KEY が"
             ".envに未設定です。Azureポータルで発行されたリソースの値を設定してください。"
         )
-    return DocumentIntelligenceClient(endpoint=ENDPOINT, credential=AzureKeyCredential(KEY))
+    return DocumentIntelligenceClient(
+        endpoint=ENDPOINT, credential=AzureKeyCredential(KEY)
+    )
 
 
 def load_all_records() -> list[dict]:
@@ -54,7 +56,9 @@ def load_record(report_id: str) -> dict:
 
 
 def expected_text(record: dict) -> str:
-    """render_inspection_form.py のテンプレートに基づく、帳票に印字されているはずの全文。"""
+    """render_inspection_form.py のテンプレートに基づく、
+    帳票に印字されているはずの全文。
+    """
     return (
         f"報告書No. {record['report_id']}\n"
         "設備点検・トラブル報告書\n"
@@ -112,7 +116,11 @@ def compare(report_id: str, client: DocumentIntelligenceClient) -> dict:
 
 def print_diff(expected_norm: str, actual_norm: str) -> None:
     diff = difflib.unified_diff(
-        [expected_norm], [actual_norm], fromfile="正解(正規化後)", tofile="OCR結果(正規化後)", lineterm=""
+        [expected_norm],
+        [actual_norm],
+        fromfile="正解(正規化後)",
+        tofile="OCR結果(正規化後)",
+        lineterm="",
     )
     print("\n".join(diff))
 
@@ -133,7 +141,8 @@ def run_all(client: DocumentIntelligenceClient) -> list[dict]:
     print(f"\n=== {len(results)}件 平均類似度: {avg:.4f} ===")
     below_perfect = [r for r in results if r["similarity"] < 1.0]
     if below_perfect:
-        print(f"満点でなかった件数: {len(below_perfect)} ({', '.join(r['report_id'] for r in below_perfect)})")
+        ids = ", ".join(r["report_id"] for r in below_perfect)
+        print(f"満点でなかった件数: {len(below_perfect)} ({ids})")
     return results
 
 

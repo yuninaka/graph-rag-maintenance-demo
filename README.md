@@ -41,9 +41,16 @@ AIエージェント応答 → 精度評価、までの一気通貫パイプラ�
 ## セットアップ
 
 ```bash
-python -m venv venv
-source venv/bin/activate  # Windowsは venv\Scripts\activate
-pip install -r requirements.txt
+uv sync
+```
+
+### 品質チェック
+
+コードを変更したら、PRを出す前に以下を実行する(pytest → ruff → mypy strict →
+vulture(report-only)を1スクリプトに集約。詳細は `CLAUDE.md` を参照)。
+
+```bash
+./scripts/ci_check.sh
 ```
 
 ### Neo4j AuraDB Free の準備
@@ -80,18 +87,18 @@ LangChain Agent実装の検証という本来の目的から外れてしまう�
 
 ```bash
 # 1. ベクトルインデックス構築
-python src/build_vector_index.py
+uv run python src/build_vector_index.py
 
 # 2. ナレッジグラフ構築(Neo4jへ投入)
-python src/build_knowledge_graph.py
+uv run python src/build_knowledge_graph.py
 
 # 3. ハイブリッドエージェントで質問応答(対話形式)
-python src/hybrid_agent.py
+uv run python src/hybrid_agent.py
 
 # 4. 精度評価(golden_qa.jsonlに対する自動採点)
 # evaluate.py は `from src.hybrid_agent import ...` と絶対importのため、
 # モジュールとして実行する(python src/evaluate.py 直接実行だと失敗する)
-python -m src.evaluate
+uv run python -m src.evaluate
 ```
 
 ## 評価結果(直近の実行)
@@ -126,7 +133,7 @@ Symptomノードの名寄せ(カテゴリ辞書によるMERGE)、後方参照検
 | `logs/agent_trace.jsonl` | Agent1回の応答ごとの、呼び出したツールの順序・引数・結果・最終回答(`vector_search`と`graph_query`を両方使ったかどうかもここで確認できる) |
 
 ```bash
-python -m src.evaluate   # 実行後、logs/配下に9問分のログが追記される
+uv run python -m src.evaluate   # 実行後、logs/配下に9問分のログが追記される
 tail -f logs/agent_trace.jsonl | jq .   # 1件ずつ整形して確認する場合
 ```
 
@@ -150,10 +157,10 @@ Intelligence(`prebuilt-layout`モデル)に投げて抽出結果を正解と比�
 
 ```bash
 # 点検記録表PDFを生成(全35件、または引数でreport_idを1件指定)
-python scripts/render_inspection_form.py
+uv run python scripts/render_inspection_form.py
 
 # Document Intelligenceで精度検証(.envにAZURE_DOCUMENT_INTELLIGENCE_*が必要)
-python scripts/ocr_document_intelligence.py
+uv run python scripts/ocr_document_intelligence.py
 ```
 
 ### パイプライン完成: OCR結果をナレッジグラフ構築に接続
@@ -167,10 +174,10 @@ python scripts/ocr_document_intelligence.py
 
 ```bash
 # PDF35件をOCRし、maintenance_logs.jsonl互換のJSONLを生成
-python scripts/ocr_to_records.py
+uv run python scripts/ocr_to_records.py
 
 # OCR由来データでナレッジグラフを構築(通常はdata/maintenance_logs.jsonlを使用)
-MAINTENANCE_LOGS_PATH=data/maintenance_logs_ocr.jsonl python src/build_knowledge_graph.py
+MAINTENANCE_LOGS_PATH=data/maintenance_logs_ocr.jsonl uv run python src/build_knowledge_graph.py
 ```
 
 OCR由来データで`evaluate.py`を実行したところ、合成データを直接使った場合と同じ
@@ -187,7 +194,7 @@ OCR由来データでの精度検証を行った。
 ```bash
 # OCR由来データでベクトルインデックスを構築(通常はdata/maintenance_logs.jsonlを使用)
 MAINTENANCE_LOGS_PATH=data/maintenance_logs_ocr.jsonl \
-  CHROMA_PERSIST_DIR=chroma_db_ocr python -m src.build_vector_index
+  CHROMA_PERSIST_DIR=chroma_db_ocr uv run python -m src.build_vector_index
 ```
 
 結果は graph 0.95 / vector 1.00 / 全体0.97(合成データ版はすべて1.00)。
