@@ -18,15 +18,18 @@ import json
 import os
 import re
 from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
+from langchain_core.language_models import BaseChatModel
 from neo4j import GraphDatabase
 
 load_dotenv()
 
-# 環境変数MAINTENANCE_LOGS_PATHで差し替え可能(例: OCR由来のdata/maintenance_logs_ocr.jsonl)。
-# パイプラインの入力を「合成データ」から「Document Intelligenceの抽出結果」に
-# 切り替えて、同じ抽出・投入コードをそのまま使えることを検証するための拡張ポイント
+# 環境変数MAINTENANCE_LOGS_PATHで差し替え可能
+# (例: OCR由来のdata/maintenance_logs_ocr.jsonl)。パイプラインの入力を
+# 「合成データ」から「Document Intelligenceの抽出結果」に切り替えて、
+# 同じ抽出・投入コードをそのまま使えることを検証するための拡張ポイント
 DATA_PATH = Path(
     os.environ.get("MAINTENANCE_LOGS_PATH")
     or (Path(__file__).parent.parent / "data" / "maintenance_logs.jsonl")
@@ -58,14 +61,20 @@ EXTRACTION_PROMPT = """以下は設備保全のトラブル報告書です。
   "action": "対処内容(短い名詞句)",
   "part": "使用部品名(なければnull)",
   "backreferences": [
-    {{"report_id": "本文中に明示的に登場する過去の報告書ID(例: R005)", "implied_category": "その過去の報告書について、本文の記述から今回追加で分かった症状カテゴリ(上記カテゴリ一覧から1つ)"}}
+    {{
+      "report_id": "本文中に明示的に登場する過去の報告書ID(例: R005)",
+      "implied_category":
+        "その報告書について本文から追加で分かった症状カテゴリ(一覧から1つ)"
+    }}
   ]
 }}
 
 backreferencesは、本文が過去の報告書IDを明示的に挙げて、**その報告書自身の症状が
 何だったかを個別に言い切っている**場合のみ含めてください。
-- 含める例:「前回(R005)は取付ボルトの緩みが原因だった」→ R005について今回の症状カテゴリと同じ扱いにできると言い切っている
-- **含めない例**:「過去に4回類似トラブル(R002, R007, R015, R022関連)が発生している」のように、
+- 含める例:「前回(R005)は取付ボルトの緩みが原因だった」→ R005について
+  今回の症状カテゴリと同じ扱いにできると言い切っている
+- **含めない例**:「過去に4回類似トラブル(R002, R007, R015, R022関連)が
+  発生している」のように、
   複数の報告書IDを「類似」「関連」とまとめて言及しているだけで、個々の報告書の症状を
   明言していない場合。特に、参照先の報告書が「(過去のXXXとは異なる症状)」のように
   **自ら今回の症状と異なると明言している**場合は、たとえ後から緩く関連付けられていても
@@ -77,7 +86,7 @@ backreferencesは、本文が過去の報告書IDを明示的に挙げて、**�
 """
 
 
-def extract_entities_claude_code(text: str) -> dict:
+def extract_entities_claude_code(text: str) -> dict[str, Any]:
     """Claude Code CLI(ヘッドレスモード)経由での抽出。
 
     バッチ的な単発呼び出しであり、LangChainのTool-calling(Function calling)
@@ -95,7 +104,9 @@ def extract_entities_claude_code(text: str) -> dict:
     # claude.aiログイン(Pro/Max定額)より優先してそれを使おうとし失敗するため除外する
     env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
 
-    prompt = EXTRACTION_PROMPT.format(text=text, categories=", ".join(SYMPTOM_CATEGORIES))
+    prompt = EXTRACTION_PROMPT.format(
+        text=text, categories=", ".join(SYMPTOM_CATEGORIES)
+    )
     result = subprocess.run(
         ["claude", "-p", prompt],
         capture_output=True,
@@ -108,15 +119,17 @@ def extract_entities_claude_code(text: str) -> dict:
 
     content = result.stdout.strip()
     content = re.sub(r"```(json)?", "", content).strip()
-    return json.loads(content)
+    parsed: dict[str, Any] = json.loads(content)
+    return parsed
 
 
-def extract_entities_llm(text: str) -> dict:
+def extract_entities_llm(text: str) -> dict[str, Any]:
     """API従量課金経由での抽出(参考実装として残置)。
 
     実案件でバッチ処理の速度・安定性を重視する場合や、CI等で
     対話型CLIを使えない環境ではこちらを使う想定。
     """
+    llm: BaseChatModel
     if LLM_PROVIDER == "anthropic":
         from langchain_anthropic import ChatAnthropic
 
@@ -128,23 +141,39 @@ def extract_entities_llm(text: str) -> dict:
     else:
         raise ValueError(f"Unknown LLM_PROVIDER: {LLM_PROVIDER}")
 
-    resp = llm.invoke(EXTRACTION_PROMPT.format(text=text, categories=", ".join(SYMPTOM_CATEGORIES)))
-    content = resp.content if hasattr(resp, "content") else str(resp)
+    prompt = EXTRACTION_PROMPT.format(
+        text=text, categories=", ".join(SYMPTOM_CATEGORIES)
+    )
+    resp = llm.invoke(prompt)
+    content = resp.content if isinstance(resp.content, str) else str(resp.content)
     content = re.sub(r"```(json)?", "", content).strip()
-    return json.loads(content)
+    parsed: dict[str, Any] = json.loads(content)
+    return parsed
 
 
-def extract_entities_rule_based(text: str) -> dict:
+def extract_entities_rule_based(text: str) -> dict[str, Any]:
     """API課金なしの簡易版。キーワード辞書でマッチングするだけの粗い実装。
     パイプラインの疎通確認・デモ用途。精度評価では低スコアになる想定で、
     LLM版との比較対象としてあえて残している。
     """
-    symptom_kw = {"異音": "異音", "過熱": "過熱", "発熱": "発熱", "停止": "停止", "圧力が低下": "圧力低下", "振動": "振動"}
-    cause_kw = {"摩耗": "摩耗", "詰まり": "詰まり", "緩み": "緩み", "劣化": "劣化", "目詰まり": "目詰まり", "潤滑不足": "潤滑不足", "異物": "異物噛み込み"}
-    action_kw = {"交換": "交換", "注油": "注油", "締め直し": "締め直し", "清掃": "清掃", "除去": "除去"}
-    part_kw = {"ベアリング": "ベアリング", "羽根車": "羽根車", "フィルター": "フィルター", "モーター": "モーター", "ボルト": "ボルト"}
+    symptom_kw = {
+        "異音": "異音", "過熱": "過熱", "発熱": "発熱",
+        "停止": "停止", "圧力が低下": "圧力低下", "振動": "振動",
+    }
+    cause_kw = {
+        "摩耗": "摩耗", "詰まり": "詰まり", "緩み": "緩み", "劣化": "劣化",
+        "目詰まり": "目詰まり", "潤滑不足": "潤滑不足", "異物": "異物噛み込み",
+    }
+    action_kw = {
+        "交換": "交換", "注油": "注油", "締め直し": "締め直し",
+        "清掃": "清掃", "除去": "除去",
+    }
+    part_kw = {
+        "ベアリング": "ベアリング", "羽根車": "羽根車", "フィルター": "フィルター",
+        "モーター": "モーター", "ボルト": "ボルト",
+    }
 
-    def find_first(kw_map):
+    def find_first(kw_map: dict[str, str]) -> str | None:
         for k, v in kw_map.items():
             if k in text:
                 return v
@@ -162,7 +191,7 @@ def extract_entities_rule_based(text: str) -> dict:
     }
 
 
-def load_records():
+def load_records() -> list[dict[str, Any]]:
     with open(DATA_PATH, encoding="utf-8") as f:
         return [json.loads(line) for line in f]
 
@@ -200,11 +229,12 @@ MERGE (r)-[h:HAS_SYMPTOM]->(s)
 """
 
 
-def main():
+def main() -> None:
     if not NEO4J_URI or not NEO4J_PASSWORD:
         raise RuntimeError(
             "NEO4J_URI / NEO4J_PASSWORD が未設定です。.env を確認してください。"
-            "Neo4j AuraDB Free (https://neo4j.com/product/auradb/) で無料インスタンスを作成できます。"
+            "Neo4j AuraDB Free (https://neo4j.com/product/auradb/) で"
+            "無料インスタンスを作成できます。"
         )
 
     records = load_records()
@@ -225,7 +255,8 @@ def main():
                 report_id=record["report_id"],
                 date=record["date"],
                 reporter=record["reporter"],
-                # 設備名はLLMの自由記述抽出だと表記ゆれが起きる(例:「コンベアB」→「コンベアBのモーター」)ため、
+                # 設備名はLLMの自由記述抽出だと表記ゆれが起きる
+                # (例:「コンベアB」→「コンベアBのモーター」)ため、
                 # 常に元データの正規化済み値を使う(グラフのEquipmentノード分裂を防ぐ)
                 equipment=record["equipment"],
                 symptom=entities.get("symptom") or "不明",

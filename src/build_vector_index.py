@@ -24,7 +24,8 @@ from langchain_community.vectorstores import Chroma
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 
-# 環境変数MAINTENANCE_LOGS_PATHで差し替え可能(例: OCR由来のdata/maintenance_logs_ocr.jsonl)。
+# 環境変数MAINTENANCE_LOGS_PATHで差し替え可能
+# (例: OCR由来のdata/maintenance_logs_ocr.jsonl)。
 # build_knowledge_graph.pyと同じ差し替えパターン。
 DATA_PATH = Path(
     os.environ.get("MAINTENANCE_LOGS_PATH")
@@ -68,7 +69,7 @@ def load_documents() -> list[Document]:
     return docs
 
 
-def main():
+def main() -> None:
     print("[1/3] 合成データを読み込み中...")
     docs = load_documents()
     print(f"  -> {len(docs)} チャンクを生成")

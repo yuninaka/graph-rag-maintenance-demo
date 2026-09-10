@@ -17,6 +17,7 @@ import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -24,6 +25,8 @@ from langchain_community.vectorstores import Chroma
 from langchain_community.graphs import Neo4jGraph
 from langchain_community.chains.graph_qa.cypher import GraphCypherQAChain
 from langchain.agents import create_agent
+from langchain_core.documents import Document
+from langchain_core.language_models import BaseChatModel
 from langchain_core.prompts import PromptTemplate
 from langchain_core.tools import Tool
 
@@ -45,7 +48,7 @@ VECTOR_SEARCH_LOG_PATH = LOG_DIR / "vector_search.jsonl"
 AGENT_TRACE_LOG_PATH = LOG_DIR / "agent_trace.jsonl"
 
 
-def _append_jsonl(path: Path, entry: dict) -> None:
+def _append_jsonl(path: Path, entry: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
@@ -53,7 +56,7 @@ def _append_jsonl(path: Path, entry: dict) -> None:
 LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "anthropic")
 
 
-def get_llm():
+def get_llm() -> BaseChatModel:
     if LLM_PROVIDER == "anthropic":
         from langchain_anthropic import ChatAnthropic
 
@@ -62,11 +65,14 @@ def get_llm():
         from langchain_openai import ChatOpenAI
 
         return ChatOpenAI(model="gpt-4o-mini", temperature=0)
-    raise ValueError("hybrid_agent.py の実行には LLM_PROVIDER=anthropic か openai が必要です")
+    raise ValueError(
+        "hybrid_agent.py の実行には LLM_PROVIDER=anthropic か openai が必要です"
+    )
 
 
-def _log_vector_search(query: str, docs: list) -> None:
-    """vector_search 1回分の検索結果(ヒットしたチャンクとそのメタデータ)をJSONLに追記する。
+def _log_vector_search(query: str, docs: list[Document]) -> None:
+    """vector_search 1回分の検索結果(ヒットしたチャンクとそのメタデータ)を
+    JSONLに追記する。
 
     graph_queryのログと対称的に、「なぜその報告書が引っかかったか」を後から
     確認できるようにする(埋め込みの類似度スコアはretrieverのデフォルトAPIでは
@@ -86,9 +92,11 @@ def _log_vector_search(query: str, docs: list) -> None:
     })
 
 
-def build_vector_tool(llm):
+def build_vector_tool(llm: BaseChatModel) -> Tool:
     embeddings = HuggingFaceEmbeddings(model_name="intfloat/multilingual-e5-small")
-    vectorstore = Chroma(persist_directory=str(PERSIST_DIR), embedding_function=embeddings)
+    vectorstore = Chroma(
+        persist_directory=str(PERSIST_DIR), embedding_function=embeddings
+    )
     retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
 
     def run(query: str) -> str:
@@ -109,11 +117,13 @@ def build_vector_tool(llm):
     )
 
 
-# Symptom.nameは自由記述ではなくSYMPTOM_CATEGORIESからの統制語彙(build_knowledge_graph.py参照)。
-# デフォルトのCypher生成プロンプトはこれを知らず、質問文の言葉をそのままname一致に
-# 使おうとして表記ゆれ以前に0件になる(例:「ベアリングの異音」)ため、
-# カテゴリへのマッピングを明示的に指示するプロンプトに差し替える
-CYPHER_GENERATION_TEMPLATE = """Task: Cypher文を生成してNeo4jグラフデータベースに問い合わせてください。
+# Symptom.nameは自由記述ではなくSYMPTOM_CATEGORIESからの統制語彙
+# (build_knowledge_graph.py参照)。デフォルトのCypher生成プロンプトはこれを知らず、
+# 質問文の言葉をそのままname一致に使おうとして表記ゆれ以前に0件になる
+# (例:「ベアリングの異音」)ため、カテゴリへのマッピングを明示的に指示する
+# プロンプトに差し替える
+CYPHER_GENERATION_TEMPLATE = """Task: Cypher文を生成してNeo4jグラフ
+データベースに問い合わせてください。
 スキーマで示された関係・プロパティのみを使用してください。
 
 重要: Symptom.name は自由記述ではなく、以下のカテゴリ一覧からのみ選ばれた統制語彙です。
@@ -136,7 +146,7 @@ CYPHER_GENERATION_PROMPT = PromptTemplate(
 )
 
 
-def _log_graph_query(query: str, result: dict) -> None:
+def _log_graph_query(query: str, result: dict[str, Any]) -> None:
     """graph_query 1回分の生成Cypher・Full Context・最終回答をJSONLに追記する。
 
     intermediate_steps は [{"query": <生成Cypher>}, {"context": <Neo4j実行結果>}]
@@ -156,7 +166,7 @@ def _log_graph_query(query: str, result: dict) -> None:
     })
 
 
-def build_graph_tool(llm):
+def build_graph_tool(llm: BaseChatModel) -> Tool:
     graph = Neo4jGraph(
         url=os.environ["NEO4J_URI"],
         username=os.environ.get("NEO4J_USER", "neo4j"),
@@ -171,13 +181,14 @@ def build_graph_tool(llm):
         cypher_prompt=CYPHER_GENERATION_PROMPT,
         verbose=True,
         return_intermediate_steps=True,
-        allow_dangerous_requests=True,  # ローカル検証用途のため許可。本番投入時は権限設計を別途行う
+        # ローカル検証用途のため許可。本番投入時は権限設計を別途行う
+        allow_dangerous_requests=True,
     )
 
     def run(query: str) -> str:
-        result = chain.invoke({"query": query})
+        result: dict[str, Any] = chain.invoke({"query": query})
         _log_graph_query(query, result)
-        return result.get("result", str(result))
+        return str(result.get("result", str(result)))
 
     return Tool(
         name="graph_query",
@@ -197,13 +208,17 @@ SYSTEM_PROMPT = (
 )
 
 
-def build_agent():
+# create_agent()の戻り値はlanggraphのCompiledStateGraph[...]で、create_agent自身の
+# TypeVar(ResponseT等)に依存する深いジェネリック型。この関数のシンプルな
+# 「エージェントを組み立てて返すだけ」という役割に対して型引数を再現する価値が
+# 薄いため、境界としてAnyを明示している(run_agentの`agent`引数も同じ理由)。
+def build_agent() -> Any:  # noqa: ANN401
     llm = get_llm()
     tools = [build_vector_tool(llm), build_graph_tool(llm)]
     return create_agent(llm, tools, system_prompt=SYSTEM_PROMPT)
 
 
-def _log_agent_trace(query: str, messages: list) -> None:
+def _log_agent_trace(query: str, messages: list[Any]) -> None:
     """Agent全体の実行トレース(どのツールを、どの順で、どんな引数・結果で
     呼んだか)をJSONLに追記する。
 
@@ -216,7 +231,9 @@ def _log_agent_trace(query: str, messages: list) -> None:
         tool_calls = getattr(m, "tool_calls", None)
         if tool_calls:
             for tc in tool_calls:
-                steps.append({"type": "tool_call", "tool": tc["name"], "args": tc["args"]})
+                steps.append(
+                    {"type": "tool_call", "tool": tc["name"], "args": tc["args"]}
+                )
         elif type(m).__name__ == "ToolMessage":
             steps.append({"type": "tool_result", "tool": m.name, "content": m.content})
 
@@ -228,13 +245,13 @@ def _log_agent_trace(query: str, messages: list) -> None:
     })
 
 
-def run_agent(agent, query: str) -> str:
+def run_agent(agent: Any, query: str) -> str:  # noqa: ANN401 (see build_agent above)
     result = agent.invoke({"messages": [{"role": "user", "content": query}]})
     _log_agent_trace(query, result["messages"])
-    return result["messages"][-1].content
+    return str(result["messages"][-1].content)
 
 
-def main():
+def main() -> None:
     agent = build_agent()
     print("設備保全ナレッジベース エージェント (終了は 'exit')")
     while True:

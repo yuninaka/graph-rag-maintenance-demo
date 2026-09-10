@@ -42,7 +42,9 @@ def get_client() -> DocumentIntelligenceClient:
             "AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT / AZURE_DOCUMENT_INTELLIGENCE_KEY が"
             ".envに未設定です。"
         )
-    return DocumentIntelligenceClient(endpoint=ENDPOINT, credential=AzureKeyCredential(KEY))
+    return DocumentIntelligenceClient(
+        endpoint=ENDPOINT, credential=AzureKeyCredential(KEY)
+    )
 
 
 def analyze(client: DocumentIntelligenceClient, pdf_path: Path) -> AnalyzeResult:
@@ -78,7 +80,9 @@ def extract_report_id(result: AnalyzeResult) -> str:
         m = REPORT_ID_RE.search(p.content)
         if m:
             return m.group(1)
-    raise ValueError("report_idを抽出できませんでした(ページヘッダーに'報告書No.'が見当たりません)")
+    raise ValueError(
+        "report_idを抽出できませんでした(ページヘッダーに'報告書No.'が見当たりません)"
+    )
 
 
 def extract_body_text(result: AnalyzeResult) -> str:
@@ -90,14 +94,22 @@ def extract_body_text(result: AnalyzeResult) -> str:
     """
     paragraphs = [p.content for p in (result.paragraphs or [])]
     label_idx = next(
-        (i for i, p in enumerate(paragraphs) if "状況" in p and "原因" in p and "対処内容" in p),
+        (
+            i
+            for i, p in enumerate(paragraphs)
+            if "状況" in p and "原因" in p and "対処内容" in p
+        ),
         None,
     )
     if label_idx is None:
         raise ValueError("本文ラベル(状況・原因・対処内容)を検出できませんでした")
 
     end_idx = next(
-        (i for i in range(label_idx + 1, len(paragraphs)) if paragraphs[i].strip() == "確認済"),
+        (
+            i
+            for i in range(label_idx + 1, len(paragraphs))
+            if paragraphs[i].strip() == "確認済"
+        ),
         len(paragraphs),
     )
     return "".join(paragraphs[label_idx + 1 : end_idx])
@@ -109,7 +121,8 @@ def result_to_record(result: AnalyzeResult) -> dict:
     record["reporter"] = record["reporter"]
     record["text"] = extract_body_text(result)
     # JSONLの元スキーマ(report_id, date, equipment, reporter, text)の順に揃える
-    return {k: record[k] for k in ["report_id", "date", "equipment", "reporter", "text"]}
+    keys = ["report_id", "date", "equipment", "reporter", "text"]
+    return {k: record[k] for k in keys}
 
 
 def convert_all() -> list[dict]:
